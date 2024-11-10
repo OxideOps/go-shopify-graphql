@@ -10,6 +10,7 @@ import (
 
 //go:generate mockgen -destination=./mock/product_service.go -package=mock . ProductService
 type ProductService interface {
+	Query(ctx context.Context, q string) ([]model.Product, error)
 	List(ctx context.Context, query string) ([]model.Product, error)
 	ListAll(ctx context.Context) ([]model.Product, error)
 
@@ -219,6 +220,16 @@ var productBulkQuery = fmt.Sprintf(`
 	}
 `, productBaseQuery)
 
+func (s *ProductServiceOp) Query(ctx context.Context, q string) ([]model.Product, error) {
+	res := []model.Product{}
+	err := s.client.BulkOperation.BulkQuery(ctx, q, &res)
+	if err != nil {
+		return []model.Product{}, err
+	}
+
+	return res, nil
+}
+
 func (s *ProductServiceOp) ListAll(ctx context.Context) ([]model.Product, error) {
 	q := fmt.Sprintf(`
 		{
@@ -232,13 +243,7 @@ func (s *ProductServiceOp) ListAll(ctx context.Context) ([]model.Product, error)
 		}
 	`, productBulkQuery)
 
-	res := []model.Product{}
-	err := s.client.BulkOperation.BulkQuery(ctx, q, &res)
-	if err != nil {
-		return []model.Product{}, err
-	}
-
-	return res, nil
+	return s.Query(ctx, q)
 }
 
 func (s *ProductServiceOp) List(ctx context.Context, query string) ([]model.Product, error) {
@@ -256,13 +261,7 @@ func (s *ProductServiceOp) List(ctx context.Context, query string) ([]model.Prod
 
 	q = strings.ReplaceAll(q, "$query", query)
 
-	res := []model.Product{}
-	err := s.client.BulkOperation.BulkQuery(ctx, q, &res)
-	if err != nil {
-		return nil, fmt.Errorf("bulk query: %w", err)
-	}
-
-	return res, nil
+	return s.Query(ctx, q)
 }
 
 func (s *ProductServiceOp) Get(ctx context.Context, id string) (*model.Product, error) {
