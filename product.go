@@ -220,13 +220,13 @@ var productBulkQuery = fmt.Sprintf(`
 	}
 `, productBaseQuery)
 
-func (s *ProductServiceOp) Query(ctx context.Context, q string) ([]model.Product, error) {
+func (s *ProductServiceOp) Query(ctx context.Context, query string) ([]model.Product, error) {
 	res := []model.Product{}
-	err := s.client.BulkOperation.BulkQuery(ctx, q, &res)
-	if err != nil {
-		return []model.Product{}, err
-	}
 
+	if err := s.client.BulkOperation.BulkQuery(ctx, query, &res); err != nil {
+		return nil, err
+	}
+	
 	return res, nil
 }
 
