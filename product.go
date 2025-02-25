@@ -10,6 +10,7 @@ import (
 
 //go:generate mockgen -destination=./mock/product_service.go -package=mock . ProductService
 type ProductService interface {
+	Query(ctx context.Context, q string, vars map[string]any) (*model.Product, error)
 	BulkQuery(ctx context.Context, q string) ([]model.Product, error)
 	List(ctx context.Context, query string) ([]model.Product, error)
 	ListAll(ctx context.Context) ([]model.Product, error)
@@ -228,6 +229,19 @@ func (s *ProductServiceOp) BulkQuery(ctx context.Context, query string) ([]model
 	}
 	
 	return res, nil
+}
+
+func (s *ProductServiceOp) Query(ctx context.Context, query string, vars map[string]any) (*model.Product, error) {
+	out := struct {
+		Product *model.Product `json:"product"`
+	}{}
+
+	err := s.client.gql.QueryString(ctx, query, vars, &out)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	
+	return out.Product, nil
 }
 
 func (s *ProductServiceOp) ListAll(ctx context.Context) ([]model.Product, error) {
