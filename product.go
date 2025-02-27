@@ -15,8 +15,6 @@ type ProductService interface {
 	BulkQuery(ctx context.Context, q string) ([]model.Product, error)
 	List(ctx context.Context, query string) ([]model.Product, error)
 	ListAll(ctx context.Context) ([]model.Product, error)
-	GetDraftProducts(ctx context.Context, fields string) ([]model.Product, error)
-	GetActiveProducts(ctx context.Context, fields string) ([]model.Product, error)
 
 	Get(ctx context.Context, id string) (*model.Product, error)
 
