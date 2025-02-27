@@ -11,6 +11,7 @@ import (
 //go:generate mockgen -destination=./mock/product_service.go -package=mock . ProductService
 type ProductService interface {
 	Query(ctx context.Context, q string, vars map[string]any) (*model.Product, error)
+	GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error)
 	BulkQuery(ctx context.Context, q string) ([]model.Product, error)
 	List(ctx context.Context, query string) ([]model.Product, error)
 	ListAll(ctx context.Context) ([]model.Product, error)
@@ -227,7 +228,7 @@ func (s *ProductServiceOp) BulkQuery(ctx context.Context, query string) ([]model
 	if err := s.client.BulkOperation.BulkQuery(ctx, query, &res); err != nil {
 		return nil, err
 	}
-	
+
 	return res, nil
 }
 
@@ -240,7 +241,7 @@ func (s *ProductServiceOp) Query(ctx context.Context, query string, vars map[str
 	if err != nil {
 		return nil, fmt.Errorf("query: %w", err)
 	}
-	
+
 	return out.Product, nil
 }
 
@@ -459,4 +460,66 @@ func (s *ProductServiceOp) MediaCreate(ctx context.Context, id string, input []m
 	}
 
 	return nil
+}
+
+func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error) {
+	// Create a query that includes the filter parameter and requested fields
+	query := fmt.Sprintf(`
+		query GetProducts($cursor: String) {
+			products(first: 250, after: $cursor, query: "%s") {
+				edges {
+					node {
+						%s
+					}
+					cursor
+				}
+				pageInfo {
+					hasNextPage
+				}
+			}
+		}
+	`, filter, fields)
+
+	// Cursor should be nil for the first page
+	vars := map[string]any{
+		"cursor": nil,
+	}
+
+	// Initialize result slice
+	var allProducts []model.Product
+
+	// Keep track of whether there are more pages
+	hasNextPage := true
+
+	// Loop until we've fetched all pages
+	for hasNextPage {
+		out := struct {
+			Products model.ProductConnection `json:"products"`
+		}{}
+
+		// Execute the query with current variables
+		err := s.client.gql.QueryString(ctx, query, vars, &out)
+		if err != nil {
+			return nil, fmt.Errorf("query: %w", err)
+		}
+
+		// Extract products from the current page
+		for _, edge := range out.Products.Edges {
+			allProducts = append(allProducts, *edge.Node)
+		}
+
+		// Check if there are more pages
+		hasNextPage = out.Products.PageInfo.HasNextPage
+
+		// If there are more pages, update the cursor for the next query
+		if hasNextPage && len(out.Products.Edges) > 0 {
+			vars["cursor"] = out.Products.Edges[len(out.Products.Edges)-1].Cursor
+		} else if hasNextPage {
+			// If we can't get a next cursor but hasNextPage is true,
+			// we should break to avoid an infinite loop
+			return nil, fmt.Errorf("pagination error: hasNextPage is true but no cursor found")
+		}
+	}
+
+	return allProducts, nil
 }
