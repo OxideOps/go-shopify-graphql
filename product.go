@@ -11,7 +11,7 @@ import (
 //go:generate mockgen -destination=./mock/product_service.go -package=mock . ProductService
 type ProductService interface {
 	Query(ctx context.Context, q string, vars map[string]any) (*model.Product, error)
-	GetAllProducts(ctx context.Context, q string, vars map[string]any) ([]model.Product, error)
+	GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error)
 	BulkQuery(ctx context.Context, q string) ([]model.Product, error)
 	List(ctx context.Context, query string) ([]model.Product, error)
 	ListAll(ctx context.Context) ([]model.Product, error)
@@ -466,7 +466,7 @@ func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, fi
 	// Create a query that includes the filter parameter and requested fields
 	query := fmt.Sprintf(`
 		query GetProducts($cursor: String) {
-			products(first: 250, after: $cursor, query: %s) {
+			products(first: 250, after: $cursor, query: "%s") {
 				edges {
 					node {
 						%s
@@ -479,10 +479,10 @@ func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, fi
 			}
 		}
 	`, filter, fields)
-	
-	// Cursor should be empty for the first page
+
+	// Cursor should be nil for the first page
 	vars := map[string]any{
-		"cursor": "",
+		"cursor": nil,
 	}
 
 	// Initialize result slice
