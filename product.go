@@ -11,8 +11,7 @@ import (
 //go:generate mockgen -destination=./mock/product_service.go -package=mock . ProductService
 type ProductService interface {
 	Query(ctx context.Context, q string, vars map[string]any) (*model.Product, error)
-	QueryAll(ctx context.Context, q string, vars map[string]any) ([]model.Product, error)
-	QueryAllWithFilter(ctx context.Context, filter string, fields string) ([]model.Product, error)
+	GetProducts(ctx context.Context, q string, vars map[string]any) ([]model.Product, error)
 	BulkQuery(ctx context.Context, q string) ([]model.Product, error)
 	List(ctx context.Context, query string) ([]model.Product, error)
 	ListAll(ctx context.Context) ([]model.Product, error)
@@ -465,20 +464,27 @@ func (s *ProductServiceOp) MediaCreate(ctx context.Context, id string, input []m
 	return nil
 }
 
-func (s *ProductServiceOp) QueryAll(ctx context.Context, query string, vars map[string]any) ([]model.Product, error) {
-	// If vars doesn't contain a cursor, initialize it
-	if vars == nil {
-		vars = make(map[string]any)
-	}
-
-	// Ensure we have a first parameter for pagination if not provided
-	if _, hasFirst := vars["first"]; !hasFirst {
-		vars["first"] = 250
-	}
-
-	// Initialize cursor to empty string for first page
-	if _, hasCursor := vars["cursor"]; !hasCursor {
-		vars["cursor"] = ""
+func (s *ProductServiceOp) GetProducts(ctx context.Context, fields string, filter string) ([]model.Product, error) {
+	// Create a query that includes the filter parameter and requested fields
+	query := fmt.Sprintf(`
+		query GetProducts($cursor: String) {
+			products(first: 250, after: $cursor, query: %s) {
+				edges {
+					node {
+						%s
+					}
+					cursor
+				}
+				pageInfo {
+					hasNextPage
+				}
+			}
+		}
+	`, filter, fields)
+	
+	// Cursor should be empty for the first page
+	vars := map[string]any{
+		"cursor": "",
 	}
 
 	// Initialize result slice
@@ -520,54 +526,12 @@ func (s *ProductServiceOp) QueryAll(ctx context.Context, query string, vars map[
 	return allProducts, nil
 }
 
-// QueryAllWithFilter is a convenience method that creates a query with filters for products
-// and uses QueryAll to fetch all matching products
-func (s *ProductServiceOp) QueryAllWithFilter(ctx context.Context, filter string, fields string) ([]model.Product, error) {
-	// Use default fields if none provided
-	if fields == "" {
-		fields = `
-			id
-			legacyResourceId
-			handle
-			title
-			description
-			productType
-			vendor
-			totalInventory
-		`
-	}
-
-	// Create a query that includes the filter parameter and requested fields
-	query := fmt.Sprintf(`
-		query GetProducts($cursor: String, $first: Int, $query: String) {
-			products(first: $first, after: $cursor, query: $query) {
-				edges {
-					node {
-						%s
-					}
-					cursor
-				}
-				pageInfo {
-					hasNextPage
-				}
-			}
-		}
-	`, fields)
-
-	// Set up variables including the filter
-	vars := map[string]any{
-		"query": filter,
-	}
-
-	return s.QueryAll(ctx, query, vars)
-}
-
 // GetDraftProducts is a convenience method that returns all draft products
 func (s *ProductServiceOp) GetDraftProducts(ctx context.Context, fields string) ([]model.Product, error) {
-	return s.QueryAllWithFilter(ctx, "status:draft", fields)
+	return s.GetProducts(ctx, fields, "status:draft")
 }
 
 // GetActiveProducts is a convenience method that returns all active products
 func (s *ProductServiceOp) GetActiveProducts(ctx context.Context, fields string) ([]model.Product, error) {
-	return s.QueryAllWithFilter(ctx, "status:active", fields)
+	return s.GetProducts(ctx, fields, "status:active")
 }
