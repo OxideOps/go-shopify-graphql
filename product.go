@@ -11,7 +11,7 @@ import (
 //go:generate mockgen -destination=./mock/product_service.go -package=mock . ProductService
 type ProductService interface {
 	Query(ctx context.Context, q string, vars map[string]any) (*model.Product, error)
-	GetProducts(ctx context.Context, q string, vars map[string]any) ([]model.Product, error)
+	GetAllProducts(ctx context.Context, q string, vars map[string]any) ([]model.Product, error)
 	BulkQuery(ctx context.Context, q string) ([]model.Product, error)
 	List(ctx context.Context, query string) ([]model.Product, error)
 	ListAll(ctx context.Context) ([]model.Product, error)
@@ -464,7 +464,7 @@ func (s *ProductServiceOp) MediaCreate(ctx context.Context, id string, input []m
 	return nil
 }
 
-func (s *ProductServiceOp) GetProducts(ctx context.Context, fields string, filter string) ([]model.Product, error) {
+func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error) {
 	// Create a query that includes the filter parameter and requested fields
 	query := fmt.Sprintf(`
 		query GetProducts($cursor: String) {
@@ -524,14 +524,4 @@ func (s *ProductServiceOp) GetProducts(ctx context.Context, fields string, filte
 	}
 
 	return allProducts, nil
-}
-
-// GetDraftProducts is a convenience method that returns all draft products
-func (s *ProductServiceOp) GetDraftProducts(ctx context.Context, fields string) ([]model.Product, error) {
-	return s.GetProducts(ctx, fields, "status:draft")
-}
-
-// GetActiveProducts is a convenience method that returns all active products
-func (s *ProductServiceOp) GetActiveProducts(ctx context.Context, fields string) ([]model.Product, error) {
-	return s.GetProducts(ctx, fields, "status:active")
 }
