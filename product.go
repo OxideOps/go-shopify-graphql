@@ -473,7 +473,7 @@ func (s *ProductServiceOp) QueryAll(ctx context.Context, query string, vars map[
 
 	// Ensure we have a first parameter for pagination if not provided
 	if _, hasFirst := vars["first"]; !hasFirst {
-		vars["first"] = 100 // Default page size
+		vars["first"] = 250
 	}
 
 	// Initialize cursor to empty string for first page
@@ -556,7 +556,6 @@ func (s *ProductServiceOp) QueryAllWithFilter(ctx context.Context, filter string
 
 	// Set up variables including the filter
 	vars := map[string]any{
-		"first": 250,
 		"query": filter,
 	}
 
