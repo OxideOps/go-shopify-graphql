@@ -520,7 +520,7 @@ func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, fi
 }
 
 func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, filter string, limit int) (<-chan model.Product, <-chan error) {
-	productChan := make(chan model.Product)
+	productChan := make(chan model.Product, limit)
 	errorChan := make(chan error)
 
 	go func() {
