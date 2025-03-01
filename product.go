@@ -520,7 +520,8 @@ func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, fi
 }
 
 func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, filter string, limit int) (<-chan model.Product, <-chan error) {
-	productChan := make(chan model.Product, limit)
+	bufferSize := max(1000, limit)
+	productChan := make(chan model.Product, bufferSize)
 	errorChan := make(chan error)
 
 	go func() {
@@ -561,6 +562,7 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 						return
 					}
 				case <-ctx.Done():
+					errorChan <- fmt.Errorf("context canceled")
 					return
 				}
 			}
