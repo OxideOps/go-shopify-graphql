@@ -12,6 +12,7 @@ import (
 type ProductService interface {
 	Query(ctx context.Context, q string, vars map[string]any) (*model.Product, error)
 	GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error)
+	StreamProducts(ctx context.Context, fields string, filter string) (<-chan model.Product, <-chan error)
 	BulkQuery(ctx context.Context, q string) ([]model.Product, error)
 	List(ctx context.Context, query string) ([]model.Product, error)
 	ListAll(ctx context.Context) ([]model.Product, error)
@@ -522,4 +523,77 @@ func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, fi
 	}
 
 	return allProducts, nil
+}
+
+func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, filter string) (<-chan model.Product, <-chan error) {
+	productChan := make(chan model.Product)
+	errorChan := make(chan error)
+
+	go func() {
+		defer close(productChan)
+		defer close(errorChan)
+
+		// Create a query that includes the filter parameter and requested fields
+		query := fmt.Sprintf(`
+			query GetProducts($cursor: String) {
+				products(first: 250, after: $cursor, query: "%s") {
+					edges {
+						node {
+							%s
+						}
+						cursor
+					}
+					pageInfo {
+						hasNextPage
+					}
+				}
+			}
+		`, filter, fields)
+
+		// Cursor should be nil for the first page
+		vars := map[string]any{
+			"cursor": nil,
+		}
+
+		// Keep track of whether there are more pages
+		hasNextPage := true
+
+		// Loop until we've fetched all pages
+		for hasNextPage {
+			out := struct {
+				Products model.ProductConnection `json:"products"`
+			}{}
+
+			// Execute the query with current variables
+			err := s.client.gql.QueryString(ctx, query, vars, &out)
+			if err != nil {
+				errorChan <- fmt.Errorf("query: %w", err)
+				return
+			}
+
+			// Stream products from the current page
+			for _, edge := range out.Products.Edges {
+				select {
+				case productChan <- *edge.Node:
+				case <-ctx.Done():
+					return
+				}
+			}
+
+			// Check if there are more pages
+			hasNextPage = out.Products.PageInfo.HasNextPage
+
+			// If there are more pages, update the cursor for the next query
+			if hasNextPage && len(out.Products.Edges) > 0 {
+				vars["cursor"] = out.Products.Edges[len(out.Products.Edges)-1].Cursor
+			} else if hasNextPage {
+				// If we can't get a next cursor but hasNextPage is true,
+				// we should break to avoid an infinite loop
+				errorChan <- fmt.Errorf("pagination error: hasNextPage is true but no cursor found")
+				return
+			}
+		}
+	}()
+
+	return productChan, errorChan
 }
