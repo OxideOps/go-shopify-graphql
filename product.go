@@ -463,11 +463,11 @@ func (s *ProductServiceOp) MediaCreate(ctx context.Context, id string, input []m
 	return nil
 }
 
-func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error) {
-	// Create a query that includes the filter parameter and requested fields
-	query := fmt.Sprintf(`
-		query GetProducts($cursor: String) {
-			products(first: 250, after: $cursor, query: "%s") {
+// getProductsQuery returns a reusable GraphQL query for fetching products
+func getProductsQuery(fields string) string {
+	return fmt.Sprintf(`
+		query GetProducts($cursor: String, $pageSize: Int!, $filter: String!) {
+			products(first: $pageSize, after: $cursor, query: $filter) {
 				edges {
 					node {
 						%s
@@ -479,15 +479,25 @@ func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, fi
 				}
 			}
 		}
-	`, filter, fields)
+	`, fields)
+}
 
-	// Cursor should be nil for the first page
-	vars := map[string]any{
-		"cursor": nil,
-	}
-
+func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error) {
 	// Initialize result slice
 	var allProducts []model.Product
+
+	// Use the shared query
+	query := getProductsQuery(fields)
+
+	// Default page size for batch fetching
+	pageSize := 250
+
+	// All parameters are passed as variables
+	vars := map[string]any{
+		"cursor":   nil,
+		"pageSize": pageSize,
+		"filter":   filter,
+	}
 
 	// Keep track of whether there are more pages
 	hasNextPage := true
@@ -539,26 +549,14 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 			pageSize = limit
 		}
 
-		// Create a query that includes the filter parameter and requested fields
-		query := fmt.Sprintf(`
-			query GetProducts($cursor: String) {
-				products(first: %d, after: $cursor, query: "%s") {
-					edges {
-						node {
-							%s
-						}
-						cursor
-					}
-					pageInfo {
-						hasNextPage
-					}
-				}
-			}
-		`, pageSize, filter, fields)
+		// Use the shared query with variables
+		query := getProductsQuery(fields)
 
-		// Cursor should be nil for the first page
+		// All parameters are passed as variables
 		vars := map[string]any{
-			"cursor": nil,
+			"cursor":   nil,
+			"pageSize": pageSize,
+			"filter":   filter,
 		}
 
 		// Keep track of whether there are more pages and how many products we've processed
