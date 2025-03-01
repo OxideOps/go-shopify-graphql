@@ -463,7 +463,6 @@ func (s *ProductServiceOp) MediaCreate(ctx context.Context, id string, input []m
 	return nil
 }
 
-// getProductsQuery returns a reusable GraphQL query for fetching products
 func getProductsQuery(fields string) string {
 	return fmt.Sprintf(`
 		query GetProducts($cursor: String, $pageSize: Int!, $filter: String!) {
@@ -483,51 +482,36 @@ func getProductsQuery(fields string) string {
 }
 
 func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error) {
-	// Initialize result slice
 	var allProducts []model.Product
 
-	// Use the shared query
 	query := getProductsQuery(fields)
-
-	// Default page size for batch fetching
-	pageSize := 250
-
-	// All parameters are passed as variables
 	vars := map[string]any{
 		"cursor":   nil,
-		"pageSize": pageSize,
+		"pageSize": 250,
 		"filter":   filter,
 	}
 
-	// Keep track of whether there are more pages
 	hasNextPage := true
 
-	// Loop until we've fetched all pages
 	for hasNextPage {
 		out := struct {
 			Products model.ProductConnection `json:"products"`
 		}{}
 
-		// Execute the query with current variables
 		err := s.client.gql.QueryString(ctx, query, vars, &out)
 		if err != nil {
 			return nil, fmt.Errorf("query: %w", err)
 		}
 
-		// Extract products from the current page
 		for _, edge := range out.Products.Edges {
 			allProducts = append(allProducts, *edge.Node)
 		}
 
-		// Check if there are more pages
 		hasNextPage = out.Products.PageInfo.HasNextPage
 
-		// If there are more pages, update the cursor for the next query
 		if hasNextPage && len(out.Products.Edges) > 0 {
 			vars["cursor"] = out.Products.Edges[len(out.Products.Edges)-1].Cursor
 		} else if hasNextPage {
-			// If we can't get a next cursor but hasNextPage is true,
-			// we should break to avoid an infinite loop
 			return nil, fmt.Errorf("pagination error: hasNextPage is true but no cursor found")
 		}
 	}
@@ -543,45 +527,36 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 		defer close(productChan)
 		defer close(errorChan)
 
-		// If limit is 0 or negative, use default page size of 250
 		pageSize := 250
 		if limit > 0 && limit < pageSize {
 			pageSize = limit
 		}
 
-		// Use the shared query with variables
 		query := getProductsQuery(fields)
-
-		// All parameters are passed as variables
 		vars := map[string]any{
 			"cursor":   nil,
 			"pageSize": pageSize,
 			"filter":   filter,
 		}
 
-		// Keep track of whether there are more pages and how many products we've processed
 		hasNextPage := true
 		productsProcessed := 0
 
-		// Loop until we've fetched all pages or reached the limit
 		for hasNextPage && (limit <= 0 || productsProcessed < limit) {
 			out := struct {
 				Products model.ProductConnection `json:"products"`
 			}{}
 
-			// Execute the query with current variables
 			err := s.client.gql.QueryString(ctx, query, vars, &out)
 			if err != nil {
 				errorChan <- fmt.Errorf("query: %w", err)
 				return
 			}
 
-			// Stream products from the current page
 			for _, edge := range out.Products.Edges {
 				select {
 				case productChan <- *edge.Node:
 					productsProcessed++
-					// If we've reached the limit, stop processing
 					if limit > 0 && productsProcessed >= limit {
 						return
 					}
@@ -590,15 +565,11 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 				}
 			}
 
-			// Check if there are more pages
 			hasNextPage = out.Products.PageInfo.HasNextPage
 
-			// If there are more pages, update the cursor for the next query
 			if hasNextPage && len(out.Products.Edges) > 0 {
 				vars["cursor"] = out.Products.Edges[len(out.Products.Edges)-1].Cursor
 			} else if hasNextPage {
-				// If we can't get a next cursor but hasNextPage is true,
-				// we should break to avoid an infinite loop
 				errorChan <- fmt.Errorf("pagination error: hasNextPage is true but no cursor found")
 				return
 			}
