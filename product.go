@@ -570,7 +570,6 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 
 		for hasNextPage && (limit <= 0 || productsProcessed < limit) {
 			if ctx.Err() != nil {
-				errorChan <- fmt.Errorf("context cancelled before fetching page: %w", ctx.Err())
 				return
 			}
 
@@ -592,7 +591,6 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 						return
 					}
 				case <-ctx.Done():
-					errorChan <- fmt.Errorf("context cancelled while processing products: %w", ctx.Err())
 					return
 				}
 			}
