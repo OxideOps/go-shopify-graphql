@@ -12,6 +12,7 @@ import (
 type ProductService interface {
 	Query(ctx context.Context, q string, vars map[string]any) (*model.Product, error)
 	GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error)
+	StreamProducts(ctx context.Context, fields string, filter string, limit int) (<-chan model.Product, <-chan error)
 	BulkQuery(ctx context.Context, q string) ([]model.Product, error)
 	List(ctx context.Context, query string) ([]model.Product, error)
 	ListAll(ctx context.Context) ([]model.Product, error)
@@ -462,11 +463,10 @@ func (s *ProductServiceOp) MediaCreate(ctx context.Context, id string, input []m
 	return nil
 }
 
-func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error) {
-	// Create a query that includes the filter parameter and requested fields
-	query := fmt.Sprintf(`
-		query GetProducts($cursor: String) {
-			products(first: 250, after: $cursor, query: "%s") {
+func getProductsQuery(fields string) string {
+	return fmt.Sprintf(`
+		query GetProducts($cursor: String, $pageSize: Int!, $filter: String!) {
+			products(first: $pageSize, after: $cursor, query: $filter) {
 				edges {
 					node {
 						%s
@@ -478,48 +478,133 @@ func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, fi
 				}
 			}
 		}
-	`, filter, fields)
+	`, fields)
+}
 
-	// Cursor should be nil for the first page
-	vars := map[string]any{
-		"cursor": nil,
-	}
-
-	// Initialize result slice
+func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error) {
 	var allProducts []model.Product
 
-	// Keep track of whether there are more pages
+	query := getProductsQuery(fields)
+	vars := map[string]any{
+		"cursor":   nil,
+		"pageSize": 250,
+		"filter":   filter,
+	}
+
 	hasNextPage := true
 
-	// Loop until we've fetched all pages
 	for hasNextPage {
 		out := struct {
 			Products model.ProductConnection `json:"products"`
 		}{}
 
-		// Execute the query with current variables
 		err := s.client.gql.QueryString(ctx, query, vars, &out)
 		if err != nil {
 			return nil, fmt.Errorf("query: %w", err)
 		}
 
-		// Extract products from the current page
 		for _, edge := range out.Products.Edges {
 			allProducts = append(allProducts, *edge.Node)
 		}
 
-		// Check if there are more pages
 		hasNextPage = out.Products.PageInfo.HasNextPage
 
-		// If there are more pages, update the cursor for the next query
 		if hasNextPage && len(out.Products.Edges) > 0 {
 			vars["cursor"] = out.Products.Edges[len(out.Products.Edges)-1].Cursor
 		} else if hasNextPage {
-			// If we can't get a next cursor but hasNextPage is true,
-			// we should break to avoid an infinite loop
 			return nil, fmt.Errorf("pagination error: hasNextPage is true but no cursor found")
 		}
 	}
 
 	return allProducts, nil
+}
+
+// StreamProducts fetches products matching the filter and streams them through a channel.
+// It returns two channels:
+//   - A product channel that will receive products until the limit is reached (if specified),
+//     all matching products are processed, or an error occurs
+//   - An error channel that will receive at most one error if something fails
+//
+// Both channels will be closed when processing completes (successful or not).
+// Consumers should handle both channels appropriately:
+//
+//	products, errs := service.StreamProducts(ctx, fields, filter, limit)
+//	for {
+//	  select {
+//	  case p, ok := <-products:
+//	    if !ok {
+//	      // Channel closed, all products processed
+//	      return
+//	    }
+//	    // Process product...
+//	  case err, ok := <-errs:
+//	    if ok {
+//	      // Handle error
+//	      return
+//	    }
+//	  }
+//	}
+func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, filter string, limit int) (<-chan model.Product, <-chan error) {
+	bufferSize := max(1000, limit)
+	productChan := make(chan model.Product, bufferSize)
+	errorChan := make(chan error, 1)
+
+	go func() {
+		defer close(productChan)
+		defer close(errorChan)
+
+		pageSize := 250
+		if limit > 0 && limit < pageSize {
+			pageSize = limit
+		}
+
+		query := getProductsQuery(fields)
+		vars := map[string]any{
+			"cursor":   nil,
+			"pageSize": pageSize,
+			"filter":   filter,
+		}
+
+		hasNextPage := true
+		productsProcessed := 0
+
+		for hasNextPage && (limit <= 0 || productsProcessed < limit) {
+			if ctx.Err() != nil {
+				return
+			}
+
+			out := struct {
+				Products model.ProductConnection `json:"products"`
+			}{}
+
+			err := s.client.gql.QueryString(ctx, query, vars, &out)
+			if err != nil {
+				errorChan <- fmt.Errorf("query: %w", err)
+				return
+			}
+
+			for _, edge := range out.Products.Edges {
+				select {
+				case productChan <- *edge.Node:
+					productsProcessed++
+					if limit > 0 && productsProcessed >= limit {
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+
+			hasNextPage = out.Products.PageInfo.HasNextPage
+
+			if hasNextPage && len(out.Products.Edges) > 0 {
+				vars["cursor"] = out.Products.Edges[len(out.Products.Edges)-1].Cursor
+			} else if hasNextPage {
+				errorChan <- fmt.Errorf("pagination error: hasNextPage is true but no cursor found")
+				return
+			}
+		}
+	}()
+
+	return productChan, errorChan
 }
