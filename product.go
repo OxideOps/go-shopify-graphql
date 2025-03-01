@@ -519,10 +519,35 @@ func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, fi
 	return allProducts, nil
 }
 
+// StreamProducts fetches products matching the filter and streams them through a channel.
+// It returns two channels:
+//   - A product channel that will receive products until the limit is reached (if specified),
+//     all matching products are processed, or an error occurs
+//   - An error channel that will receive at most one error if something fails
+//
+// Both channels will be closed when processing completes (successful or not).
+// Consumers should handle both channels appropriately:
+//
+//	products, errs := service.StreamProducts(ctx, fields, filter, limit)
+//	for {
+//	  select {
+//	  case p, ok := <-products:
+//	    if !ok {
+//	      // Channel closed, all products processed
+//	      return
+//	    }
+//	    // Process product...
+//	  case err, ok := <-errs:
+//	    if ok {
+//	      // Handle error
+//	      return
+//	    }
+//	  }
+//	}
 func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, filter string, limit int) (<-chan model.Product, <-chan error) {
 	bufferSize := max(1000, limit)
 	productChan := make(chan model.Product, bufferSize)
-	errorChan := make(chan error)
+	errorChan := make(chan error, 1)
 
 	go func() {
 		defer close(productChan)
@@ -544,6 +569,11 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 		productsProcessed := 0
 
 		for hasNextPage && (limit <= 0 || productsProcessed < limit) {
+			if ctx.Err() != nil {
+				errorChan <- fmt.Errorf("context cancelled before fetching page: %w", ctx.Err())
+				return
+			}
+
 			out := struct {
 				Products model.ProductConnection `json:"products"`
 			}{}
@@ -562,7 +592,7 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 						return
 					}
 				case <-ctx.Done():
-					errorChan <- fmt.Errorf("context canceled")
+					errorChan <- fmt.Errorf("context cancelled while processing products: %w", ctx.Err())
 					return
 				}
 			}
