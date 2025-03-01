@@ -12,7 +12,7 @@ import (
 type ProductService interface {
 	Query(ctx context.Context, q string, vars map[string]any) (*model.Product, error)
 	GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error)
-	StreamProducts(ctx context.Context, fields string, filter string) (<-chan model.Product, <-chan error)
+	StreamProducts(ctx context.Context, fields string, filter string, limit int) (<-chan model.Product, <-chan error)
 	BulkQuery(ctx context.Context, q string) ([]model.Product, error)
 	List(ctx context.Context, query string) ([]model.Product, error)
 	ListAll(ctx context.Context) ([]model.Product, error)
@@ -525,7 +525,7 @@ func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, fi
 	return allProducts, nil
 }
 
-func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, filter string) (<-chan model.Product, <-chan error) {
+func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, filter string, limit int) (<-chan model.Product, <-chan error) {
 	productChan := make(chan model.Product)
 	errorChan := make(chan error)
 
@@ -533,10 +533,16 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 		defer close(productChan)
 		defer close(errorChan)
 
+		// If limit is 0 or negative, use default page size of 250
+		pageSize := 250
+		if limit > 0 && limit < pageSize {
+			pageSize = limit
+		}
+
 		// Create a query that includes the filter parameter and requested fields
 		query := fmt.Sprintf(`
 			query GetProducts($cursor: String) {
-				products(first: 250, after: $cursor, query: "%s") {
+				products(first: %d, after: $cursor, query: "%s") {
 					edges {
 						node {
 							%s
@@ -548,18 +554,19 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 					}
 				}
 			}
-		`, filter, fields)
+		`, pageSize, filter, fields)
 
 		// Cursor should be nil for the first page
 		vars := map[string]any{
 			"cursor": nil,
 		}
 
-		// Keep track of whether there are more pages
+		// Keep track of whether there are more pages and how many products we've processed
 		hasNextPage := true
+		productsProcessed := 0
 
-		// Loop until we've fetched all pages
-		for hasNextPage {
+		// Loop until we've fetched all pages or reached the limit
+		for hasNextPage && (limit <= 0 || productsProcessed < limit) {
 			out := struct {
 				Products model.ProductConnection `json:"products"`
 			}{}
@@ -575,6 +582,11 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 			for _, edge := range out.Products.Edges {
 				select {
 				case productChan <- *edge.Node:
+					productsProcessed++
+					// If we've reached the limit, stop processing
+					if limit > 0 && productsProcessed >= limit {
+						return
+					}
 				case <-ctx.Done():
 					return
 				}
