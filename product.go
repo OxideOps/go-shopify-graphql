@@ -12,7 +12,7 @@ import (
 type ProductService interface {
 	Query(ctx context.Context, q string, vars map[string]any) (*model.Product, error)
 	GetAllProducts(ctx context.Context, fields string, filter string) ([]model.Product, error)
-	StreamProducts(ctx context.Context, fields string, filter string, limit int) (<-chan model.Product, <-chan error)
+	StreamProducts(ctx context.Context, fields string, filter string, limit int) <-chan model.Product
 	BulkQuery(ctx context.Context, q string) ([]model.Product, error)
 	List(ctx context.Context, query string) ([]model.Product, error)
 	ListAll(ctx context.Context) ([]model.Product, error)
@@ -544,14 +544,12 @@ func (s *ProductServiceOp) GetAllProducts(ctx context.Context, fields string, fi
 //	    }
 //	  }
 //	}
-func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, filter string, limit int) (<-chan model.Product, <-chan error) {
+func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, filter string, limit int) <-chan model.Product {
 	bufferSize := max(1000, limit)
 	productChan := make(chan model.Product, bufferSize)
-	errorChan := make(chan error, 1)
 
 	go func() {
 		defer close(productChan)
-		defer close(errorChan)
 
 		pageSize := 250
 		if limit > 0 && limit < pageSize {
@@ -569,28 +567,19 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 		productsProcessed := 0
 
 		for hasNextPage && (limit <= 0 || productsProcessed < limit) {
-			if ctx.Err() != nil {
-				return
-			}
-
 			out := struct {
 				Products model.ProductConnection `json:"products"`
 			}{}
 
 			err := s.client.gql.QueryString(ctx, query, vars, &out)
 			if err != nil {
-				errorChan <- fmt.Errorf("query: %w", err)
 				return
 			}
 
 			for _, edge := range out.Products.Edges {
-				select {
-				case productChan <- *edge.Node:
-					productsProcessed++
-					if limit > 0 && productsProcessed >= limit {
-						return
-					}
-				case <-ctx.Done():
+				productChan <- *edge.Node
+				productsProcessed++
+				if limit > 0 && productsProcessed >= limit {
 					return
 				}
 			}
@@ -600,11 +589,10 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 			if hasNextPage && len(out.Products.Edges) > 0 {
 				vars["cursor"] = out.Products.Edges[len(out.Products.Edges)-1].Cursor
 			} else if hasNextPage {
-				errorChan <- fmt.Errorf("pagination error: hasNextPage is true but no cursor found")
 				return
 			}
 		}
 	}()
 
-	return productChan, errorChan
+	return productChan
 }
