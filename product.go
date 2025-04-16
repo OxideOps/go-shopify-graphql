@@ -30,7 +30,7 @@ type ProductService interface {
 	VariantsBulkReorder(ctx context.Context, id string, input []model.ProductVariantPositionInput) error
 
 	MediaCreate(ctx context.Context, id string, input []model.CreateMediaInput) error
-	Set(ctx context.Context, synchronous bool, input model.ProductSetInput) error
+	Set(ctx context.Context, input model.ProductSetInput) error
 }
 
 type ProductServiceOp struct {
@@ -88,7 +88,7 @@ type mutationProductCreateMedia struct {
 type mutationProductSet struct {
 	ProductSetResult struct {
 		UserErrors []model.UserError `json:"userErrors,omitempty"`
-	} `graphql:"productSet(synchronous: $synchronous, input: $input)" json:"productSet"`
+	} `graphql:"productSet(input: $input)" json:"productSet"`
 }
 
 const productBaseQuery = `
@@ -604,12 +604,11 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 	return productChan
 }
 
-func (s *ProductServiceOp) Set(ctx context.Context, synchronous bool, input model.ProductSetInput) error {
+func (s *ProductServiceOp) Set(ctx context.Context, input model.ProductSetInput) error {
 	m := mutationProductSet{}
 
 	vars := map[string]any{
-		"synchronous": synchronous,
-		"input":       input,
+		"input": input,
 	}
 
 	err := s.client.gql.Mutate(ctx, &m, vars)
