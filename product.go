@@ -87,10 +87,8 @@ type mutationProductCreateMedia struct {
 
 type mutationProductSet struct {
 	ProductSetResult struct {
-		Product model.Product `json:"product,omitempty"`
-		ProductSetOperation model.ProductSetOperation `json:"productSetOperation,omitempty"`
 		UserErrors []model.UserError `json:"userErrors,omitempty"`
-	} `graphql:"productSet(synchronous: $synchronous, input: $productSet)" json:"productSet"`
+	} `graphql:"productSet(synchronous: $synchronous, input: $input)" json:"productSet"`
 }
 
 const productBaseQuery = `
