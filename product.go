@@ -3,6 +3,7 @@ package shopify
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/r0busta/go-shopify-graphql-model/v4/graph/model"
@@ -580,6 +581,7 @@ func (s *ProductServiceOp) StreamProducts(ctx context.Context, fields string, fi
 
 			err := s.client.gql.QueryString(ctx, query, vars, &out)
 			if err != nil {
+				log.Printf("Error querying products: %v", err)
 				return
 			}
 
